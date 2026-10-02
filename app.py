@@ -18,7 +18,7 @@ load_dotenv()
 # 1. PAGE CONFIGURATION & ANTI-FLICKER CSS
 # ==========================================
 st.set_page_config(
-    page_title="Bengaluru Commuter Flood Radar",
+    page_title="Bengaluru Commuter Waterlogging Radar",
     page_icon="🌊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -44,7 +44,7 @@ st.markdown(
     .main-header {
         font-size: 2.2rem;
         font-weight: 800;
-        color: #0F172A;
+        color: var(--text-color, #0F172A);
         margin-bottom: 0.2rem;
         display: flex;
         align-items: center;
@@ -52,56 +52,134 @@ st.markdown(
     }
     .sub-header {
         font-size: 1.05rem;
-        color: #475569;
+        color: var(--text-color, #475569);
+        opacity: 0.85;
         margin-bottom: 1.2rem;
     }
     .metric-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
+        background: var(--secondary-background-color, #FFFFFF);
+        border: 1px solid rgba(128, 128, 128, 0.2);
         border-radius: 10px;
         padding: 1rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        color: var(--text-color, inherit);
+    }
+    .commuter-radar-box {
+        background: rgba(37, 99, 235, 0.08);
+        border: 2px solid #2563EB;
+        border-radius: 12px;
+        padding: 14px 18px 10px 18px;
+        margin: 12px 0 14px 0;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+    }
+    .commuter-radar-title {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #3B82F6;
+        letter-spacing: 0.3px;
+    }
+    .commuter-radar-sub {
+        font-size: 0.92rem;
+        color: var(--text-color, #475569);
+        opacity: 0.88;
+        margin-top: 2px;
+    }
+    .summary-ribbon {
+        background-color: var(--secondary-background-color, rgba(128, 128, 128, 0.08));
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0 16px 0;
+        font-size: 0.90rem;
+        color: var(--text-color, inherit);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+    .summary-ribbon-forecast {
+        background-color: rgba(2, 132, 199, 0.10);
+        border: 1px solid rgba(2, 132, 199, 0.3);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0 16px 0;
+        font-size: 0.90rem;
+        color: var(--text-color, inherit);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+    .weather-info-box {
+        background-color: var(--secondary-background-color, rgba(128, 128, 128, 0.08));
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 8px;
+        padding: 10px 16px;
+        margin: 10px 0 18px 0;
+        font-size: 13px;
+        color: var(--text-color, inherit);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
     }
     .risk-badge-low {
-        background-color: #ECFDF5;
-        color: #059669;
+        background-color: rgba(16, 185, 129, 0.15);
+        color: #10B981;
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
-        border: 1px solid #A7F3D0;
+        border: 1px solid rgba(16, 185, 129, 0.35);
     }
     .risk-badge-advisory {
-        background-color: #F0F9FF;
-        color: #0369A1;
+        background-color: rgba(2, 132, 199, 0.15);
+        color: #38BDF8;
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
-        border: 1px solid #BAE6FD;
+        border: 1px solid rgba(2, 132, 199, 0.35);
     }
     .risk-badge-caution {
-        background-color: #FEFCE8;
-        color: #A16207;
+        background-color: rgba(234, 179, 8, 0.15);
+        color: #FACC15;
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
-        border: 1px solid #FDE68A;
+        border: 1px solid rgba(234, 179, 8, 0.35);
     }
     .risk-badge-high {
-        background-color: #FFF7ED;
-        color: #C2410C;
+        background-color: rgba(249, 115, 22, 0.15);
+        color: #FB923C;
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
-        border: 1px solid #FDBA74;
+        border: 1px solid rgba(249, 115, 22, 0.35);
     }
     .risk-badge-severe {
-        background-color: #FEF2F2;
-        color: #991B1B;
+        background-color: rgba(239, 68, 68, 0.15);
+        color: #F87171;
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
-        border: 1px solid #FECACA;
+        border: 1px solid rgba(239, 68, 68, 0.35);
     }
+
+    /* Dark Mode Media Query & Streamlit Theme Overrides */
+    @media (prefers-color-scheme: dark) {
+        .main-header { color: #F8FAFC !important; }
+        .sub-header { color: #CBD5E1 !important; }
+        .commuter-radar-sub { color: #CBD5E1 !important; }
+        .summary-ribbon { color: #F1F5F9 !important; }
+        .summary-ribbon-forecast { color: #E0F2FE !important; }
+        .weather-info-box { color: #E2E8F0 !important; }
+    }
+    [data-theme="dark"] .main-header { color: #F8FAFC !important; }
+    [data-theme="dark"] .sub-header { color: #CBD5E1 !important; }
+    [data-theme="dark"] .commuter-radar-sub { color: #CBD5E1 !important; }
+    [data-theme="dark"] .summary-ribbon { color: #F1F5F9 !important; }
+    [data-theme="dark"] .summary-ribbon-forecast { color: #E0F2FE !important; }
+    [data-theme="dark"] .weather-info-box { color: #E2E8F0 !important; }
     </style>
     """,
     unsafe_allow_html=True
@@ -686,7 +764,7 @@ def calculate_flood_risk(tags: dict, coords: list[tuple[float, float]], water_no
         retention = 0.05  # Gravity drainage: water sheds immediately
     elif tunnel == "yes" or layer == "-1":
         base_score = 85.0
-        infra_type = "Underpass / Tunnel (Flood Trap)"
+        infra_type = "Underpass / Low Depression (Waterlogging Trap)"
         retention = 1.50  # Sunken bowl: water remains trapped
     elif highway in ["trunk", "primary", "trunk_link", "primary_link"]:
         base_score = 30.0
@@ -719,7 +797,7 @@ def calculate_flood_risk(tags: dict, coords: list[tuple[float, float]], water_no
     final_risk = max(0.0, min(100.0, final_risk))
 
     # Step 4: 5-Tier Color Progression:
-    # 🟢 Green (Clear) -> 🔵 Blue (Wet / Puddles) -> 🟡 Yellow (Caution / Mud) -> 🟠 Orange (High Risk) -> 🔴 Red (Flooded)
+    # 🟢 Green (Clear) -> 🔵 Blue (Wet / Puddles) -> 🟡 Yellow (Caution / Mud) -> 🟠 Orange (High Risk) -> 🔴 Red (Severe Waterlogging)
     if final_risk < 35.0:
         color = "#10B981"  # Emerald Green
         risk_category = "Clear / Low Risk"
@@ -734,7 +812,7 @@ def calculate_flood_risk(tags: dict, coords: list[tuple[float, float]], water_no
         risk_category = "High Risk / Deep Waterlogging"
     else:
         color = "#B91C1C"  # Deep Crimson Red
-        risk_category = "Severe Hazard / Flooded"
+        risk_category = "Severe Waterlogging / Impassable"
 
     return {
         "base_score": base_score,
@@ -829,7 +907,7 @@ def calculate_forecast_flood_risk(
     risk_delta = forecast_risk - current_risk
 
     if risk_delta >= 15.0:
-        trend = "Rapidly Flooding"
+        trend = "Rapid Water Accumulation"
         trend_icon = "📈"
         trend_color = "#DC2626"
     elif risk_delta >= 5.0:
@@ -869,7 +947,7 @@ def calculate_forecast_flood_risk(
         risk_category = "High Risk / Deep Waterlogging"
     else:
         color = "#B91C1C"
-        risk_category = "Severe Hazard / Flooded"
+        risk_category = "Severe Waterlogging / Impassable"
 
     return {
         "current_risk": current_risk,
@@ -902,7 +980,7 @@ if "selected_location" not in st.session_state:
 mapbox_token = os.getenv("MAPBOX_ACCESS_TOKEN", "").strip()
 
 with st.sidebar:
-    st.markdown("### ⚙️ Flood Radar Settings")
+    st.markdown("### ⚙️ Waterlogging Radar Settings")
     
     # Mapbox Token Check & Entry
     if not mapbox_token or mapbox_token == "your_mapbox_token_here":
@@ -922,11 +1000,11 @@ with st.sidebar:
     st.markdown("### 🚦 Water Level & Road Risk Guide")
     st.markdown(
         """
-        - 🟢 **Clear / Low Risk (< 35%)**: Dry surface or elevated flyover; standard traffic flow.
-        - 🔵 **Wet Road / Minor Puddles (35% – 49%)**: Wet road with surface puddles; normal caution.
-        - 🟡 **Caution / Moderate Water (50% – 69%)**: Water accumulating along curbs and dips; drive slow.
-        - 🟠 **High Risk / Waterlogged (70% – 84%)**: Significant standing water; hazardous for two-wheelers.
-        - 🔴 **Severe Hazard / Flooded (≥ 85%)**: Flooded road or underpass bowl; impassable, do not enter!
+        - 🟢 **Clear / Low Risk (< 35%)**: Dry surface or elevated flyover; standard commute conditions.
+        - 🔵 **Wet Road / Minor Puddles (35% – 49%)**: Wet road with surface puddles; minor splashing.
+        - 🟡 **Caution / Moderate Water (50% – 69%)**: Water accumulating along curbs and dips; slow down.
+        - 🟠 **High Risk / Waterlogged (70% – 84%)**: Deep standing water; hazardous for two-wheelers and pedestrians.
+        - 🔴 **Severe Waterlogging / Impassable (≥ 85%)**: Deep water accumulation or submerged dip; impassable!
         """
     )
 
@@ -947,10 +1025,10 @@ with st.sidebar:
 # ==========================================
 
 # Title & Description
-st.markdown('<div class="main-header">🌊 Bengaluru Commuter Flood Radar</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🌊 Bengaluru Commuter Waterlogging Radar</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">'
-    'Real-time physical waterlogging risk and predictive flood forecast for every street within 1 km in Bengaluru.'
+    'Real-time physical waterlogging risk and predictive water accumulation forecast for every street in Bengaluru.'
     '</div>',
     unsafe_allow_html=True
 )
@@ -986,12 +1064,12 @@ st.markdown(f"📍 **Selected Location:** **{dest_name}** — *{dest_address}*")
 # ==========================================
 st.markdown(
     """
-    <div style="background: #F0F7FF; border: 2px solid #2563EB; border-radius: 12px; padding: 14px 18px 8px 18px; margin: 12px 0 14px 0; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);">
+    <div class="commuter-radar-box">
         <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.3rem;">🚦</span>
-            <span style="font-size: 1.15rem; font-weight: 800; color: #1E3A8A; letter-spacing: 0.3px;">COMMUTER RADAR VIEW</span>
+            <span style="font-size: 1.3rem;">📡</span>
+            <span class="commuter-radar-title">COMMUTER RADAR VIEW</span>
         </div>
-        <div style="font-size: 0.92rem; color: #475569; margin-top: 2px;">
+        <div class="commuter-radar-sub">
             Toggle between <b>Real-Time Road Conditions</b> and <b>Predictive Waterlogging Forecast (+30m / +60m)</b>
         </div>
     </div>
@@ -1166,7 +1244,7 @@ if not is_forecast:
             )
         elif active_precip >= 5.0:
             st.error(
-                f"🔴 **Severe Downpour Alert ({active_precip:.1f} mm):** Heavy torrential rain actively flooding low-lying streets and underpasses. Avoid low corridors."
+                f"🔴 **Severe Downpour Alert ({active_precip:.1f} mm):** Heavy torrential rain actively waterlogging low-lying streets and underpasses. Avoid low corridors."
             )
         elif active_precip >= 1.5:
             st.warning(
@@ -1213,7 +1291,7 @@ else:
         if w_code in [95, 96, 99] or target_forecast_precip >= 3.0:
             st.error(
                 f"⛈️ **Active Storm & Inflow Alert (+{selected_horizon}m):** Convective storm ({target_forecast_precip:.1f} mm incoming) "
-                "will rapidly overwhelm road gutters. Severe waterlogging and flooded underpasses expected!"
+                "will rapidly overwhelm road gutters. Severe waterlogging and submerged underpasses expected!"
             )
         elif target_forecast_precip >= 1.0 or target_rain_rate >= 4.0:
             st.warning(
@@ -1246,13 +1324,13 @@ if total_roads > 0:
     if not is_forecast:
         st.markdown(
             f"""
-            <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; margin: 10px 0 16px 0; font-size: 0.90rem; color: #334155; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <div class="summary-ribbon">
                 <span>🛣️ <b>{total_roads}</b> Streets Monitored</span>
                 <span class="risk-badge-low">🟢 {low_risk_count} Clear</span>
                 <span class="risk-badge-advisory">🔵 {advisory_count} Wet / Puddles</span>
                 <span class="risk-badge-caution">🟡 {caution_count} Caution / Mud</span>
                 <span class="risk-badge-high">🟠 {high_risk_count} Waterlogged</span>
-                <span class="risk-badge-severe">🔴 {severe_risk_count} Flooded</span>
+                <span class="risk-badge-severe">🔴 {severe_risk_count} Severe Waterlogging</span>
                 <span>🌊 <b>{len(water_nodes)}</b> Nearby Lakes / Drains</span>
             </div>
             """,
@@ -1261,12 +1339,12 @@ if total_roads > 0:
     else:
         st.markdown(
             f"""
-            <div style="background-color: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 8px; padding: 10px 14px; margin: 10px 0 16px 0; font-size: 0.90rem; color: #0C4A6E; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <div class="summary-ribbon-forecast">
                 <span>🔮 <b>Forecast Horizon: +{selected_horizon} Minutes</b></span>
                 <span>🛣️ <b>{total_roads}</b> Streets Modeled</span>
-                <span style="color:#DC2626; font-weight:700;">📈 {worsening_count} Worsening</span>
-                <span style="color:#059669; font-weight:700;">📉 {draining_count} Draining / Improving</span>
-                <span class="risk-badge-severe">🔴 {severe_risk_count} Flooded</span>
+                <span style="color:#EF4444; font-weight:700;">📈 {worsening_count} Worsening</span>
+                <span style="color:#10B981; font-weight:700;">📉 {draining_count} Draining / Improving</span>
+                <span class="risk-badge-severe">🔴 {severe_risk_count} Severe Waterlogging</span>
                 <span class="risk-badge-high">🟠 {high_risk_count} Waterlogged</span>
                 <span class="risk-badge-caution">🟡 {caution_count} Moderate / Puddles</span>
                 <span class="risk-badge-low">🟢 {low_risk_count} Clear</span>
@@ -1279,15 +1357,15 @@ if total_roads > 0:
 # 6. TABBED DASHBOARD: MAP & WEATHER
 # ==========================================
 tab_map, tab_weather = st.tabs([
-    "🗺️ Road Flood Map",
+    "🗺️ Street Waterlogging Map",
     "🌦️ Live Weather & Rain Forecast"
 ])
 
 with tab_map:
     map_title = (
-        f"##### 🔮 Forecasted Street Flood Hazard Map (1km Radius — Horizon: +{selected_horizon} Minutes)"
+        f"##### 🔮 Forecasted Street Waterlogging Map (Horizon: +{selected_horizon} Minutes)"
         if is_forecast else
-        "##### 🗺️ Current Road Map (Right Now — 1 km Radius)"
+        "##### 🗺️ Current Street Waterlogging Map (Right Now)"
     )
     st.markdown(map_title)
 
@@ -1314,7 +1392,7 @@ with tab_map:
 
     # Marker dropped on the searched location
     destination_popup_html = f"""
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-width: 180px;">
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-width: 180px; color: #0F172A;">
         <h4 style="margin: 0 0 6px 0; color: #1E3A8A; font-size: 14px;">📍 {dest_name}</h4>
         <p style="margin: 0; font-size: 12px; color: #475569;">{dest_address}</p>
         <hr style="margin: 6px 0; border: none; border-top: 1px solid #E2E8F0;"/>
@@ -1342,7 +1420,7 @@ with tab_map:
         if is_forecast:
             hover_tooltip = f"{r_name} — In {selected_horizon}m: {category} ({risk['trend_icon']} {risk['trend']})"
             road_popup_html = f"""
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.5; min-width: 220px;">
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.5; min-width: 220px; color: #0F172A;">
                 <b style="font-size: 13px; color: #0F172A;">{r_name}</b><br/>
                 <div style="margin: 5px 0; padding: 4px 8px; border-radius: 4px; background: {color}22; border-left: 4px solid {color};">
                     <b>In {selected_horizon} Mins: <span style="color: {color}; font-size: 14px;">{category}</span></b>
@@ -1357,7 +1435,7 @@ with tab_map:
         else:
             hover_tooltip = f"{r_name} — {category}"
             road_popup_html = f"""
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.5; min-width: 220px;">
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.5; min-width: 220px; color: #0F172A;">
                 <b style="font-size: 13px; color: #0F172A;">{r_name}</b><br/>
                 <div style="margin: 5px 0; padding: 4px 8px; border-radius: 4px; background: {color}22; border-left: 4px solid {color};">
                     <b>Condition: <span style="color: {color}; font-size: 14px;">{category}</span></b>
@@ -1392,43 +1470,7 @@ with tab_map:
         returned_objects=[]
     )
 
-    # Road Water Risk Table Expander
-    table_label = (
-        f"📋 Vulnerable Streets & Waterlogging Risk (+{selected_horizon}m Forecast)"
-        if is_forecast else
-        "📋 Vulnerable Streets & Waterlogging Risk (Real-Time)"
-    )
-    with st.expander(table_label):
-        severe_roads = [r for r in evaluated_roads if r["risk"]["final_risk"] >= 35.0]
-        severe_roads.sort(key=lambda x: x["risk"]["final_risk"], reverse=True)
-
-        if not severe_roads:
-            st.success("All roads in this 1 km area are currently Clear / Low Risk (< 35%). Have a safe drive!")
-        else:
-            st.write(f"Displaying {min(len(severe_roads), 30)} roads with water accumulation or inundation risk:")
-            table_rows = []
-            for r in severe_roads[:30]:
-                if is_forecast:
-                    table_rows.append({
-                        "Road Name": r["name"],
-                        f"Forecast (+{selected_horizon}m)": f"{r['risk']['forecast_risk']:.1f}%",
-                        "Expected Change": f"{r['risk']['trend_icon']} {r['risk']['trend']}",
-                        "Current Baseline": f"{r['risk']['current_risk']:.0f}%",
-                        "Category": r['risk']['category'],
-                        "Road Type": r['risk']['infra_type'],
-                        "Near Lake / Drain": "⚠️ Yes" if r['risk']['near_water'] else "No"
-                    })
-                else:
-                    table_rows.append({
-                        "Road Name": r["name"],
-                        "Risk Score": f"{r['risk']['final_risk']:.1f}%",
-                        "Status": r['risk']['category'],
-                        "Road Type": r['risk']['infra_type'],
-                        "Surface Water": f"{r['risk'].get('residual_rain', 0.0):.1f} mm",
-                        "Near Lake / Drain": "⚠️ Yes" if r['risk']['near_water'] else "No"
-                    })
-            st.dataframe(table_rows, use_container_width=True)
-
+    
 with tab_weather:
     w_raw_time = weather_data.get("observation_time", "")
     if "T" in w_raw_time:
@@ -1442,8 +1484,8 @@ with tab_weather:
 
     st.markdown(
         f"""
-        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 16px; margin: 10px 0 18px 0; font-size: 13px; color: #475569; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-            <span>📍 <b>{dest_name}</b> Weather Station</span>
+        <div class="weather-info-box">
+            <span>📍 <b>{dest_name}</b></span>
             <span>🛰️ <b>Radar Snapshot:</b> {formatted_obs_time}</span>
             <span>⚡ <b>Ensemble Radar:</b> DWD ICON + Météo-France + ECMWF + GFS</span>
             <span>🟢 <b>Dashboard Sync:</b> Live (5-min cache)</span>
@@ -1527,7 +1569,7 @@ with tab_weather:
     # Ground Water Status Card
     st.markdown(
         f"""
-        <div style="background:#F8FAFC; border:1px solid #E2E8F0; padding:12px 16px; border-radius:8px; margin:12px 0; font-size:13px; color:#334155; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div class="weather-info-box">
             <span>🌊 <b>Ground Water & Mud Index:</b> {weather_data.get('residual_burden', 0.0):.2f} mm</span>
             <span>🚦 <b>Drainage Status:</b> {weather_data.get('drainage_phase', 'Dry & Clear')}</span>
         </div>
@@ -1606,6 +1648,6 @@ with tab_weather:
             Bengaluru sits at an altitude of ~920 meters, and night-time relative humidity frequently exceeds **90% to 98%**. 
             Weather forecast models compute condensation in the boundary layer and report it as trace drizzle (0.1 mm), even though the moisture often evaporates or settles merely as dew on vegetation before collecting on tarmac.
             
-            Our radar automatically cross-checks ground wetness and past 24-hour rainfall to avoid false waterlogging alerts on dry pavement while retaining accurate warnings for mud, puddles, and flooded underpasses.
+            Our radar automatically cross-checks ground wetness and past 24-hour rainfall to avoid false waterlogging alerts on dry pavement while retaining accurate warnings for mud, puddles, and submerged underpasses.
             """
         )
