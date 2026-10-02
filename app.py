@@ -980,7 +980,7 @@ if "selected_location" not in st.session_state:
 mapbox_token = os.getenv("MAPBOX_ACCESS_TOKEN", "").strip()
 
 with st.sidebar:
-    st.markdown("### ⚙️ Waterlogging Radar Settings")
+    st.markdown("### Status")
     
     # Mapbox Token Check & Entry
     if not mapbox_token or mapbox_token == "your_mapbox_token_here":
@@ -994,10 +994,10 @@ with st.sidebar:
             mapbox_token = custom_token.strip()
             st.success("Token active for this session!")
     else:
-        st.success("✅ Mapbox Search API Connected")
+        st.success("✅ Connected")
 
     st.markdown("---")
-    st.markdown("### 🚦 Water Level & Road Risk Guide")
+    st.markdown("### Guide")
     st.markdown(
         """
         - 🟢 **Clear / Low Risk (< 35%)**
