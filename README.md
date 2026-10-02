@@ -57,45 +57,6 @@ When you search for any location (college, office, tech park, metro station, or 
 
 ---
 
-## 🚀 Quickstart Guide
-
-### 1. Prerequisites & Virtual Environment
-
-Ensure you have Python 3.9+ installed:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
-pip install streamlit folium streamlit-folium requests python-dotenv streamlit-searchbox pandas
-```
-
-### 2. Environment Configuration
-
-```powershell
-cp .env.example .env
-```
-
-Open `.env` and insert your Mapbox access token:
-
-```env
-MAPBOX_ACCESS_TOKEN=pk.eyJ1IjoieW91ci11c2VybmFtZSIsImEiOiJ5b3VyLXRva2VuIn0...
-```
-
-### 3. Run the Application
-
-```powershell
-streamlit run app.py
-```
-
-The application will launch in your browser at `http://localhost:8501`.
-
----
-
 ## 🌐 External APIs Grounding
 
 | API | Service Provider | Purpose | Cache Policy |
