@@ -1000,11 +1000,11 @@ with st.sidebar:
     st.markdown("### 🚦 Water Level & Road Risk Guide")
     st.markdown(
         """
-        - 🟢 **Clear / Low Risk (< 35%)**: Dry surface or elevated flyover; standard commute conditions.
-        - 🔵 **Wet Road / Minor Puddles (35% – 49%)**: Wet road with surface puddles; minor splashing.
-        - 🟡 **Caution / Moderate Water (50% – 69%)**: Water accumulating along curbs and dips; slow down.
-        - 🟠 **High Risk / Waterlogged (70% – 84%)**: Deep standing water; hazardous for two-wheelers and pedestrians.
-        - 🔴 **Severe Waterlogging / Impassable (≥ 85%)**: Deep water accumulation or submerged dip; impassable!
+        - 🟢 **Clear / Low Risk (< 35%)**
+        - 🔵 **Wet Road (35% – 49%)**
+        - 🟡 **Caution (50% – 69%)**
+        - 🟠 **High Risk (70% – 84%)**
+        - 🔴 **Severe Waterlogging (≥ 85%)**
         """
     )
 
