@@ -34,6 +34,13 @@ st.markdown(
         opacity: 1 !important;
         transition: none !important;
     }
+    /* Completely hide Streamlit's default top-right 'Running...' status indicator */
+    [data-testid="stStatusWidget"],
+    .stStatusWidget,
+    [data-testid="stToolbar"] [data-testid="stStatusWidget"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
     .main-header {
         font-size: 2.2rem;
         font-weight: 800;
@@ -137,6 +144,12 @@ PRESET_LANDMARKS = [
         "address": "Kempegowda Bus Station, Majestic, Bengaluru",
         "lat": 12.9772,
         "lon": 77.5713
+    },
+    {
+        "name": "Church Street (Brigade Rd / MG Rd Hub)",
+        "address": "Church St, Shanthala Nagar, Ashok Nagar, Bengaluru",
+        "lat": 12.9744,
+        "lon": 77.6077
     }
 ]
 
@@ -470,105 +483,140 @@ def load_preset_osm(lat: float, lon: float, max_dist_m: float = 2000.0) -> dict 
         return None
 
 
-@st.cache_data(ttl=3600)
-def fetch_infrastructure(lat: float, lon: float) -> dict:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_overpass_cached(lat: float, lon: float) -> dict:
     """
-    Overpass API (Infrastructure & Geography):
+    Internal cached Overpass query:
     Fetches real roads (way["highway"]) and water bodies (way["waterway"])
-    within 1000m radius of [lat, lon] using official Overpass API HTTPS endpoints.
-    For standard landmarks, checks bundled authentic OpenStreetMap cache for instant rendering.
-    Cache: ttl=3600s (1 hour)
+    within an adaptive 850m / 600m radius of [lat, lon] using official Overpass API HTTPS endpoints.
+    IMPORTANT: Raises an exception if no roads are returned so Streamlit NEVER caches failures.
     """
-    # 1. Immediate authentic OSM cache check (e.g. BMSIT default or landmark selection)
-    preset_data = load_preset_osm(lat, lon, max_dist_m=600.0)
-    if preset_data and preset_data.get("roads"):
-        return preset_data
+    headers = {
+        "User-Agent": "BengaluruCommuterFloodRadar/1.0 (streamlit-app; contact: floodradar@bengaluru.gov.in)",
+        "Accept": "*/*"
+    }
 
-    # 2. Live OpenStreetMap Overpass query
-    query = f"""[out:json][timeout:25];
+    endpoints = [
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter"
+    ]
+
+    raw_data = None
+
+    # Tiered query: try 850m first; if congested/busy, fall back to 600m
+    for r in [850, 600]:
+        query = f"""[out:json][timeout:25];
 (
-  way["highway"](around:1000, {lat:.5f}, {lon:.5f});
-  way["waterway"](around:1000, {lat:.5f}, {lon:.5f});
-  way["natural"="water"](around:1000, {lat:.5f}, {lon:.5f});
+  way["highway"](around:{r}, {lat:.5f}, {lon:.5f});
+  way["waterway"](around:{r}, {lat:.5f}, {lon:.5f});
+  way["natural"="water"](around:{r}, {lat:.5f}, {lon:.5f});
 );
 out body;
 >;
 out skel qt;
 """
-    headers = {
-        "User-Agent": "BengaluruCommuterFloodRadar/1.0 (streamlit-app; contact: floodradar@bengaluru.gov.in)"
-    }
-
-    # High-speed HTTPS mirrors (tested and verified)
-    endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-        "http://overpass-api.de/api/interpreter"
-    ]
-
-    raw_data = None
-    for ep in endpoints:
-        try:
-            resp = requests.post(ep, data={"data": query}, headers=headers, timeout=12)
-            if resp.status_code == 200:
-                raw_data = resp.json()
-                break
-        except Exception:
-            continue
-
-    roads = []
-    water_nodes = []
-
-    if raw_data:
-        elements = raw_data.get("elements", [])
-        nodes = {}
-        ways = []
-
-        for el in elements:
-            el_type = el.get("type")
-            if el_type == "node":
-                nodes[el["id"]] = (float(el["lat"]), float(el["lon"]))
-            elif el_type == "way":
-                ways.append(el)
-
-        for w in ways:
-            tags = w.get("tags", {})
-            node_ids = w.get("nodes", [])
-            coords = [nodes[nid] for nid in node_ids if nid in nodes]
-
-            if not coords or len(coords) < 2:
+        for ep in endpoints:
+            try:
+                resp = requests.post(ep, data={"data": query}, headers=headers, timeout=28)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    elems = data.get("elements", [])
+                    # Quick check if it has actual road ways
+                    if any(el.get("type") == "way" and "highway" in el.get("tags", {}) for el in elems):
+                        raw_data = data
+                        break
+                elif resp.status_code in (429, 504):
+                    time.sleep(1.0)
+            except Exception:
                 continue
 
-            is_water = "waterway" in tags or tags.get("natural") == "water"
-            is_road = "highway" in tags
+        if raw_data:
+            break
 
-            if is_water:
-                water_nodes.extend(coords)
+    if not raw_data:
+        raise RuntimeError(f"Overpass API servers unreachable or congested for coordinates ({lat}, {lon})")
 
-            if is_road:
-                road_name = tags.get("name")
-                if not road_name:
-                    h_type = tags.get("highway", "road").replace("_", " ").title()
-                    road_name = f"Unnamed {h_type}"
+    elements = raw_data.get("elements", [])
+    nodes = {}
+    ways = []
 
-                roads.append({
-                    "id": w.get("id"),
-                    "name": road_name,
-                    "tags": tags,
-                    "coords": coords
-                })
+    for el in elements:
+        el_type = el.get("type")
+        if el_type == "node":
+            nodes[el["id"]] = (float(el["lat"]), float(el["lon"]))
+        elif el_type == "way":
+            ways.append(el)
 
-    # 3. If live query failed/timed out, fallback to nearest bundled authentic OSM landmark (up to 2.5km)
+    water_nodes = []
+    roads = []
+
+    for w in ways:
+        tags = w.get("tags", {})
+        node_ids = w.get("nodes", [])
+        coords = [nodes[nid] for nid in node_ids if nid in nodes]
+
+        if not coords or len(coords) < 2:
+            continue
+
+        is_water = "waterway" in tags or tags.get("natural") == "water"
+        is_road = "highway" in tags
+
+        if is_water:
+            water_nodes.extend(coords)
+
+        if is_road:
+            road_name = tags.get("name")
+            if not road_name:
+                h_type = tags.get("highway", "road").replace("_", " ").title()
+                road_name = f"Unnamed {h_type}"
+
+            roads.append({
+                "id": w.get("id"),
+                "name": road_name,
+                "tags": tags,
+                "coords": coords
+            })
+
+    # If Overpass returned no roads, do NOT cache the empty result
     if not roads:
-        fallback_preset = load_preset_osm(lat, lon, max_dist_m=2500.0)
-        if fallback_preset and fallback_preset.get("roads"):
-            return fallback_preset
+        raise RuntimeError(f"No road elements returned for coordinates ({lat}, {lon})")
 
     return {
         "roads": roads,
         "water_nodes": water_nodes,
-        "success": bool(roads)
+        "success": True
+    }
+
+
+def fetch_infrastructure(lat: float, lon: float) -> dict:
+    """
+    Robust Infrastructure Fetcher:
+    1. Checks pre-bundled authentic OpenStreetMap cache for landmarks (0ms latency, zero failure).
+    2. Queries live OpenStreetMap Overpass with cache (only caches successful calls).
+    3. Falls back to nearest authentic preset if servers were temporarily busy.
+    """
+    # 1. Immediate authentic OSM cache check (e.g. BMSIT, Church St, Silk Board, etc.)
+    preset_data = load_preset_osm(lat, lon, max_dist_m=800.0)
+    if preset_data and preset_data.get("roads"):
+        return preset_data
+
+    # 2. Live OpenStreetMap query (only caches successes)
+    try:
+        return _fetch_overpass_cached(lat, lon)
+    except Exception:
+        pass
+
+    # 3. Fallback to nearest bundled authentic OSM landmark (up to 3.5km)
+    fallback_preset = load_preset_osm(lat, lon, max_dist_m=3500.0)
+    if fallback_preset and fallback_preset.get("roads"):
+        return fallback_preset
+
+    return {
+        "roads": [],
+        "water_nodes": [],
+        "success": False
     }
 
 
@@ -886,9 +934,9 @@ with st.sidebar:
     st.markdown("### 💡 Commuter Travel Tips")
     st.markdown(
         """
-        • **Underpasses & Dips:** Water funnels into low points and stays trapped for hours after rain stops.
-        • **Lakeside Roads & Storm Drains:** Overflowing Raja Kaluves cause backflow onto road surfaces.
-        • **Flyovers & Elevated Bridges:** Always the safest, driest transit routes during and after downpours.
+        • **Underpasses & Dips:** Water funnels into low points and stays trapped for hours after rain stops.  
+        • **Lakeside Roads & Storm Drains:** Overflowing Raja Kaluves cause backflow onto road surfaces.  
+        • **Flyovers & Elevated Bridges:** Always the safest, driest transit routes during and after downpours.  
         """
     )
     st.caption("Covers a 1 km radius around your destination")
@@ -973,14 +1021,8 @@ if is_forecast:
         )
         selected_horizon = 30 if "+30 Minutes" in horizon_choice else 60
 
-# Step 2: Processing with st.spinner
-spinner_msg = (
-    f"Forecasting street-level water accumulation and rainfall for +{selected_horizon} minutes near {dest_name}..."
-    if is_forecast else
-    f"Analyzing road elevation, drainage status, and rainfall near {dest_name}..."
-)
-
-with st.spinner(spinner_msg):
+# Step 2: Processing with clean Loading spinner
+with st.spinner("Loading..."):
     # Fetch live weather, 15m nowcasting, and 24h past drainage from Open-Meteo
     weather_data = fetch_weather(dest_lat, dest_lon)
     live_precip = weather_data.get("precipitation", 0.0)
@@ -1488,21 +1530,6 @@ with tab_weather:
         <div style="background:#F8FAFC; border:1px solid #E2E8F0; padding:12px 16px; border-radius:8px; margin:12px 0; font-size:13px; color:#334155; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
             <span>🌊 <b>Ground Water & Mud Index:</b> {weather_data.get('residual_burden', 0.0):.2f} mm</span>
             <span>🚦 <b>Drainage Status:</b> {weather_data.get('drainage_phase', 'Dry & Clear')}</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # Road Drainage Guide
-    st.markdown(
-        """
-        <div style="background:#F1F5F9; border-left:4px solid #0284C7; padding:12px 16px; border-radius:6px; margin:12px 0; font-size:13px; color:#334155; line-height:1.6;">
-            <b>💧 Road Drainage & Runoff Characteristics:</b><br/>
-            • <b>Underpasses & Dips:</b> Natural catchments trap runoff; remain waterlogged for hours without active pumping.<br/>
-            • <b>Lakeside Roads & Storm Canals (Raja Kaluves):</b> High water levels cause backflow onto road surfaces.<br/>
-            • <b>Residential Layout Roads:</b> Flat gutters and unpaved shoulders retain mud and standing puddles for 3–6 hours.<br/>
-            • <b>Major Arterial Roads:</b> Engineered side drains provide steady, reliable runoff discharge.<br/>
-            • <b>Flyovers & Elevated Bridges:</b> Rapid gravity drainage ensures surfaces stay dry and safe.
         </div>
         """,
         unsafe_allow_html=True
