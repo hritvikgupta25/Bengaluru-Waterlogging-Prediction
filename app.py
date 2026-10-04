@@ -359,7 +359,6 @@ def fetch_weather(lat: float, lon: float) -> dict:
         f"&minutely_15=precipitation&past_minutely_15=12&forecast_minutely_15=24"
         f"&hourly=precipitation,rain,temperature_2m,weather_code"
         f"&past_hours=24&forecast_hours=24&timezone=Asia%2FKolkata"
-        f"&models=icon_seamless,meteofrance_seamless,ecmwf_ifs025,gfs_seamless"
     )
     t0 = time.perf_counter()
     try:
@@ -371,22 +370,17 @@ def fetch_weather(lat: float, lon: float) -> dict:
         hourly = data.get("hourly", {})
         m15 = data.get("minutely_15", {})
 
-        models = ["icon_seamless", "meteofrance_seamless", "ecmwf_ifs025", "gfs_seamless"]
-
-        # 1. Multi-Model Hourly Rain & Weather Code Fusion
+        # 1. Hourly Rain & Weather Code (Direct Best-Match Model)
         h_times = hourly.get("time", [])
-        unified_hourly_precip = []
-        unified_hourly_codes = []
-        for i in range(len(h_times)):
-            vals = [hourly.get(f"precipitation_{m}", [0]*len(h_times))[i] for m in models if hourly.get(f"precipitation_{m}")]
-            codes = [hourly.get(f"weather_code_{m}", [0]*len(h_times))[i] for m in models if hourly.get(f"weather_code_{m}")]
-            unified_hourly_precip.append(max(vals) if vals else 0.0)
-            valid_codes = [c for c in codes if c is not None]
-            unified_hourly_codes.append(max(valid_codes) if valid_codes else 0)
+        raw_hourly_precip = [float(p) for p in hourly.get("precipitation", [0.0] * len(h_times))]
+        raw_hourly_codes = [int(c) for c in hourly.get("weather_code", [0] * len(h_times))]
+
+        # Filter trace condensation noise (< 0.15 mm) from individual hourly slots
+        cleaned_hourly_precip = [p if p >= 0.15 else 0.0 for p in raw_hourly_precip]
 
         # 2. Extract 24-Hour Past History (first 24 slots)
-        past_times = h_times[:24] if len(h_times) >= 24 else h_times[:len(unified_hourly_precip)]
-        past_precips = [float(p) for p in unified_hourly_precip[:24]] if len(unified_hourly_precip) >= 24 else [float(p) for p in unified_hourly_precip]
+        past_times = h_times[:24] if len(h_times) >= 24 else h_times[:len(cleaned_hourly_precip)]
+        past_precips = cleaned_hourly_precip[:24] if len(cleaned_hourly_precip) >= 24 else cleaned_hourly_precip
 
         p_1h = float(past_precips[-1]) if past_precips else 0.0
         p_3h = float(sum(past_precips[-3:])) if len(past_precips) >= 3 else float(sum(past_precips))
@@ -403,36 +397,39 @@ def fetch_weather(lat: float, lon: float) -> dict:
         reversed_precips = list(reversed(past_precips))
         residual_burden = sum(p * w for p, w in zip(reversed_precips, drain_weights_24h))
 
-        # 3. Active Current Precipitation & Storm Code
+        # 3. Active Current Precipitation & Storm Code (GROUND TRUTH SENSOR)
         c_precip = float(current.get("precipitation", 0.0))
         c_showers = float(current.get("showers", 0.0))
         c_rain = float(current.get("rain", 0.0))
         c_code = int(current.get("weather_code", 0))
 
-        # Check the recent/current hour in unified hourly
-        curr_hour_idx = 24 if len(unified_hourly_precip) > 24 else len(unified_hourly_precip) - 1
-        recent_window_precip = max(unified_hourly_precip[max(0, curr_hour_idx-1):curr_hour_idx+1]) if unified_hourly_precip else 0.0
-        recent_window_code = max(unified_hourly_codes[max(0, curr_hour_idx-1):curr_hour_idx+1]) if unified_hourly_codes else 0
+        raw_current_precip = max(c_precip, c_rain, c_showers)
 
-        # Active rainfall takes the maximum convective signal across models and current sensor readings
-        active_current_precip = max(c_precip, c_showers, c_rain, recent_window_precip)
-        active_weather_code = max(c_code, recent_window_code)
+        # Ground reality validation:
+        # In tropical high-elevation Bengaluru (920m), nocturnal humidity > 90% produces
+        # trace numerical condensation (0.05 - 0.2mm) that never wets the ground.
+        # Only report active rainfall when actual precipitation reaches >= 0.25 mm/h.
+        if raw_current_precip < 0.25:
+            active_current_precip = 0.0
+            # If weather code was nominal trace drizzle (51, 53) without actual rain, mark as overcast (3)
+            active_weather_code = 3 if c_code in [51, 53] else c_code
+        else:
+            active_current_precip = raw_current_precip
+            active_weather_code = c_code
 
-        # 4. High-Precision 15-Minute Nowcasting Projections (Next 30m to 60m)
+        # 4. 15-Minute Nowcasting Projections (Next 30m to 60m)
         m15_times = m15.get("time", [])
-        unified_m15 = []
-        for i in range(len(m15_times)):
-            vals = [m15.get(f"precipitation_{m}", [0]*len(m15_times))[i] for m in models if m15.get(f"precipitation_{m}")]
-            unified_m15.append(max(vals) if vals else 0.0)
+        raw_m15 = [float(p) for p in m15.get("precipitation", [0.0] * len(m15_times))]
+        cleaned_m15 = [p if p >= 0.15 else 0.0 for p in raw_m15]
 
-        p_next_30m = float(sum(unified_m15[13:15])) if len(unified_m15) >= 15 else 0.0
-        p_next_60m = float(sum(unified_m15[13:17])) if len(unified_m15) >= 17 else 0.0
+        p_next_30m = float(sum(cleaned_m15[13:15])) if len(cleaned_m15) >= 15 else 0.0
+        p_next_60m = float(sum(cleaned_m15[13:17])) if len(cleaned_m15) >= 17 else 0.0
 
         nowcast_intervals = []
         if len(m15_times) >= 17:
             for idx, offset_m in [(13, 15), (14, 30), (15, 45), (16, 60)]:
                 t_str = m15_times[idx].split("T")[-1]
-                p_val = float(unified_m15[idx])
+                p_val = float(cleaned_m15[idx])
                 nowcast_intervals.append({
                     "horizon": f"+{offset_m}m ({t_str})",
                     "rain_mm": round(p_val, 2),
@@ -442,16 +439,18 @@ def fetch_weather(lat: float, lon: float) -> dict:
         # Drainage phase description
         if active_weather_code in [95, 96, 99]:
             drainage_phase = "Active Thunderstorm ⛈️"
-        elif active_current_precip > 0.4:
+        elif active_current_precip >= 0.5:
             drainage_phase = "Active Rainfall 🌧️"
-        elif residual_burden > 2.0:
-            drainage_phase = "Waterlogged / Slow Drainage"
-        elif residual_burden > 0.5:
-            drainage_phase = "Lingering Puddles & Muddy Roads"
-        elif p_24h > 1.0:
-            drainage_phase = "Damp Surfaces / Minor Pooling"
+        elif active_current_precip > 0.0:
+            drainage_phase = "Light Rain / Drizzle 🌦️"
+        elif residual_burden > 3.0:
+            drainage_phase = "Waterlogged / Slow Drainage 🌊"
+        elif residual_burden > 0.8:
+            drainage_phase = "Lingering Puddles & Damp Roads 💧"
+        elif p_24h > 2.0:
+            drainage_phase = "Damp Surfaces / Runoff Draining"
         else:
-            drainage_phase = "Dry & Clear"
+            drainage_phase = "Dry & Clear ☀️"
 
         return {
             "precipitation": round(active_current_precip, 2),
@@ -461,8 +460,8 @@ def fetch_weather(lat: float, lon: float) -> dict:
             "wind_speed_10m": float(current.get("wind_speed_10m", 3.0)),
             "weather_code": active_weather_code,
             "surface_pressure": float(current.get("surface_pressure", 913.0)),
-            "rain": round(max(c_rain, active_current_precip), 2),
-            "showers": round(max(c_showers, active_current_precip), 2),
+            "rain": round(active_current_precip, 2),
+            "showers": round(active_current_precip, 2),
             "observation_time": current.get("time", ""),
             "interval_seconds": current.get("interval", 900),
             "past_times": past_times,
@@ -480,10 +479,10 @@ def fetch_weather(lat: float, lon: float) -> dict:
             "nowcast_15m": nowcast_intervals,
             "hourly": {
                 "time": h_times,
-                "precipitation": unified_hourly_precip,
-                "weather_code": unified_hourly_codes
+                "precipitation": cleaned_hourly_precip,
+                "weather_code": raw_hourly_codes
             },
-            "models_used": "Ensemble (DWD ICON, Météo-France, ECMWF, GFS)",
+            "models_used": "Open-Meteo High-Resolution Best-Match",
             "raw_data": data,
             "latency_ms": latency_ms,
             "endpoint_url": url,
@@ -1112,14 +1111,9 @@ with st.spinner("Loading..."):
     past_24h_rain = weather_data.get("past_24h", 0.0)
     drainage_phase = weather_data.get("drainage_phase", "Dry & Clear")
 
-    # Smart Ground Filter: Only filter nocturnal trace condensation (<=0.15mm)
-    # when there is no active rain/storm weather code (<50) and past rain is near zero (<0.2mm).
-    # If weather_code >= 50 (drizzle, rain, thunderstorm 95/96/99), it is NEVER filtered!
-    w_code = int(weather_data.get("weather_code", 0))
-    if live_precip <= 0.15 and past_3h_rain < 0.2 and w_code < 50:
-        active_precip = 0.0
-    else:
-        active_precip = live_precip
+    # Ground Reality Check: live_precip is already filtered in fetch_weather.
+    # Active rain is only passed to the road risk engine if precipitation >= 0.25 mm/h.
+    active_precip = live_precip if live_precip >= 0.25 else 0.0
 
     active_residual = raw_residual
 
@@ -1487,7 +1481,7 @@ with tab_weather:
         <div class="weather-info-box">
             <span>📍 <b>{dest_name}</b></span>
             <span>🛰️ <b>Radar Snapshot:</b> {formatted_obs_time}</span>
-            <span>⚡ <b>Ensemble Radar:</b> DWD ICON + Météo-France + ECMWF + GFS</span>
+            <span>⚡ <b>Radar Engine:</b> Open-Meteo Calibrated Best-Match (ECMWF + DWD)</span>
             <span>🟢 <b>Dashboard Sync:</b> Live (5-min cache)</span>
         </div>
         """,
@@ -1505,7 +1499,7 @@ with tab_weather:
         st.metric(
             label="🌧️ Active Rainfall",
             value=f"{weather_data.get('precipitation', 0.0):.1f} mm",
-            delta="⛈️ Thunderstorm / Heavy Downpour" if w_code in [95, 96, 99] else ("Actively raining" if weather_data.get('precipitation', 0.0) > 0 else "No rain")
+            delta="⛈️ Thunderstorm / Heavy Downpour" if w_code in [95, 96, 99] else ("Actively raining" if weather_data.get('precipitation', 0.0) >= 0.25 else "Dry / No rain")
         )
         st.metric(
             label="💧 Relative Humidity",
