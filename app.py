@@ -1040,19 +1040,6 @@ with st.sidebar:
         """
     )
 
-    st.markdown("---")
-    st.markdown("### 🌦️ Weather Source & Testing")
-    weather_sim_option = st.selectbox(
-        "Weather Mode:",
-        options=[
-            "🛰️ Live Meteorological Radar (Default)",
-            "🌧️ Moderate Monsoon Rain (8 mm/h)",
-            "⛈️ Cloudburst / Heavy Downpour (25 mm/h)",
-            "☀️ Dry / Clear Sky (0 mm/h)"
-        ],
-        index=0,
-        help="Use real-time radar observations, or simulate custom cloudbursts to test how roads flood."
-    )
 
     st.markdown("---")
     st.markdown("### 💡 Commuter Travel Tips")
@@ -1158,29 +1145,8 @@ with st.spinner("Loading..."):
     past_24h_rain = weather_data.get("past_24h", 0.0)
     drainage_phase = weather_data.get("drainage_phase", "Dry & Clear")
 
-    # Apply user weather simulation override if selected in sidebar
-    if "Moderate Monsoon" in weather_sim_option:
-        active_precip = 8.0
-        live_precip = 8.0
-        weather_data["precipitation"] = 8.0
-        weather_data["weather_code"] = 63
-        weather_data["drainage_phase"] = "Simulated Moderate Rain 🌧️"
-    elif "Cloudburst" in weather_sim_option:
-        active_precip = 25.0
-        live_precip = 25.0
-        weather_data["precipitation"] = 25.0
-        weather_data["weather_code"] = 95
-        weather_data["drainage_phase"] = "Simulated Severe Thunderstorm ⛈️"
-    elif "Dry" in weather_sim_option:
-        active_precip = 0.0
-        live_precip = 0.0
-        weather_data["precipitation"] = 0.0
-        weather_data["weather_code"] = 0
-        weather_data["drainage_phase"] = "Simulated Clear & Dry ☀️"
-    else:
-        # Default: live meteorological radar rate
-        active_precip = live_precip
-
+    # Live precipitation and ground moisture
+    active_precip = live_precip
     active_residual = raw_residual
 
     # Fetch infrastructure & waterways from Overpass
