@@ -397,30 +397,16 @@ def fetch_weather(lat: float, lon: float) -> dict:
         reversed_precips = list(reversed(past_precips))
         residual_burden = sum(p * w for p, w in zip(reversed_precips, drain_weights_24h))
 
-        # 3. Active Current Precipitation & Storm Code (GROUND TRUTH SENSOR)
+        # 3. Active Current Precipitation & Storm Code
         c_precip = float(current.get("precipitation", 0.0))
         c_showers = float(current.get("showers", 0.0))
         c_rain = float(current.get("rain", 0.0))
         c_code = int(current.get("weather_code", 0))
 
-        raw_current_precip = max(c_precip, c_rain, c_showers)
-
-        # Ground reality validation:
-        # In tropical high-elevation Bengaluru (920m), nocturnal humidity > 90% produces
-        # trace numerical condensation (0.05 - 0.2mm) that never wets the ground.
-        # Only report active rainfall when actual precipitation reaches >= 0.25 mm/h.
-        if raw_current_precip < 0.25:
-            active_current_precip = 0.0
-            # If weather code was nominal trace drizzle (51, 53) without actual rain, mark as overcast (3)
-            active_weather_code = 3 if c_code in [51, 53] else c_code
-        else:
-            active_current_precip = raw_current_precip
-            active_weather_code = c_code
-
         # 4. 15-Minute Nowcasting Projections (Next 30m to 60m)
         m15_times = m15.get("time", [])
         raw_m15 = [float(p) for p in m15.get("precipitation", [0.0] * len(m15_times))]
-        cleaned_m15 = [p if p >= 0.15 else 0.0 for p in raw_m15]
+        cleaned_m15 = [p if p >= 0.10 else 0.0 for p in raw_m15]
 
         p_next_30m = float(sum(cleaned_m15[13:15])) if len(cleaned_m15) >= 15 else 0.0
         p_next_60m = float(sum(cleaned_m15[13:17])) if len(cleaned_m15) >= 17 else 0.0
@@ -436,13 +422,42 @@ def fetch_weather(lat: float, lon: float) -> dict:
                     "rate_mm_hr": round(p_val * 4.0, 1)
                 })
 
+        # Calculate live rain rate
+        recent_m15 = cleaned_m15[11:14] if len(cleaned_m15) >= 14 else cleaned_m15
+        max_m15_rate = max(recent_m15) * 4.0 if recent_m15 else 0.0
+
+        WMO_RAIN_BASELINES = {
+            51: 1.5, 53: 2.5, 55: 4.0,
+            61: 4.5, 63: 10.0, 65: 22.0,
+            80: 5.0, 81: 12.0, 82: 28.0,
+            95: 22.0, 96: 35.0, 99: 50.0
+        }
+
+        raw_current_precip = max(c_precip, c_rain, c_showers)
+        hourly_rate_from_sensor = raw_current_precip * 4.0  # 15m to 1h conversion
+
+        if c_code in WMO_RAIN_BASELINES:
+            # Active rain confirmed by meteorological code: never mute or suppress!
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, p_1h, WMO_RAIN_BASELINES[c_code])
+            active_weather_code = c_code
+        elif hourly_rate_from_sensor >= 0.8 or max_m15_rate >= 0.8:
+            # Physical sensor or 15m radar detected active rain
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate)
+            active_weather_code = 61 if c_code < 50 else c_code
+        else:
+            # Clear or dry overcast sky - nocturnal humidity condensation is filtered
+            active_current_precip = 0.0
+            active_weather_code = c_code
+
         # Drainage phase description
         if active_weather_code in [95, 96, 99]:
             drainage_phase = "Active Thunderstorm ⛈️"
-        elif active_current_precip >= 0.5:
-            drainage_phase = "Active Rainfall 🌧️"
+        elif active_current_precip >= 10.0:
+            drainage_phase = "Severe Downpour 🌧️"
+        elif active_current_precip >= 3.0:
+            drainage_phase = "Moderate Rain 🌧️"
         elif active_current_precip > 0.0:
-            drainage_phase = "Light Rain / Drizzle 🌦️"
+            drainage_phase = "Active Drizzle / Light Rain 🌦️"
         elif residual_burden > 3.0:
             drainage_phase = "Waterlogged / Slow Drainage 🌊"
         elif residual_burden > 0.8:
@@ -1008,6 +1023,20 @@ with st.sidebar:
     )
 
     st.markdown("---")
+    st.markdown("### 🌦️ Weather Source & Testing")
+    weather_sim_option = st.selectbox(
+        "Weather Mode:",
+        options=[
+            "🛰️ Live Meteorological Radar (Default)",
+            "🌧️ Moderate Monsoon Rain (8 mm/h)",
+            "⛈️ Cloudburst / Heavy Downpour (25 mm/h)",
+            "☀️ Dry / Clear Sky (0 mm/h)"
+        ],
+        index=0,
+        help="Use real-time radar observations, or simulate custom cloudbursts to test how roads flood."
+    )
+
+    st.markdown("---")
     st.markdown("### 💡 Commuter Travel Tips")
     st.markdown(
         """
@@ -1111,9 +1140,28 @@ with st.spinner("Loading..."):
     past_24h_rain = weather_data.get("past_24h", 0.0)
     drainage_phase = weather_data.get("drainage_phase", "Dry & Clear")
 
-    # Ground Reality Check: live_precip is already filtered in fetch_weather.
-    # Active rain is only passed to the road risk engine if precipitation >= 0.25 mm/h.
-    active_precip = live_precip if live_precip >= 0.25 else 0.0
+    # Apply user weather simulation override if selected in sidebar
+    if "Moderate Monsoon" in weather_sim_option:
+        active_precip = 8.0
+        live_precip = 8.0
+        weather_data["precipitation"] = 8.0
+        weather_data["weather_code"] = 63
+        weather_data["drainage_phase"] = "Simulated Moderate Rain 🌧️"
+    elif "Cloudburst" in weather_sim_option:
+        active_precip = 25.0
+        live_precip = 25.0
+        weather_data["precipitation"] = 25.0
+        weather_data["weather_code"] = 95
+        weather_data["drainage_phase"] = "Simulated Severe Thunderstorm ⛈️"
+    elif "Dry" in weather_sim_option:
+        active_precip = 0.0
+        live_precip = 0.0
+        weather_data["precipitation"] = 0.0
+        weather_data["weather_code"] = 0
+        weather_data["drainage_phase"] = "Simulated Clear & Dry ☀️"
+    else:
+        # Default: live meteorological radar rate
+        active_precip = live_precip
 
     active_residual = raw_residual
 
@@ -1497,9 +1545,9 @@ with tab_weather:
 
     with m_col1:
         st.metric(
-            label="🌧️ Active Rainfall",
-            value=f"{weather_data.get('precipitation', 0.0):.1f} mm",
-            delta="⛈️ Thunderstorm / Heavy Downpour" if w_code in [95, 96, 99] else ("Actively raining" if weather_data.get('precipitation', 0.0) >= 0.25 else "Dry / No rain")
+            label="🌧️ Active Rainfall Intensity",
+            value=f"{weather_data.get('precipitation', 0.0):.1f} mm/h",
+            delta="⛈️ Heavy Downpour / Thunderstorm" if w_code in [95, 96, 99] else ("🌧️ Actively raining" if weather_data.get('precipitation', 0.0) > 0.0 else "☀️ Dry / No rain")
         )
         st.metric(
             label="💧 Relative Humidity",
