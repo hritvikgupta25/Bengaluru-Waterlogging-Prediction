@@ -359,6 +359,7 @@ def fetch_weather(lat: float, lon: float) -> dict:
         f"&minutely_15=precipitation&past_minutely_15=12&forecast_minutely_15=24"
         f"&hourly=precipitation,rain,temperature_2m,weather_code"
         f"&past_hours=24&forecast_hours=24&timezone=Asia%2FKolkata"
+        f"&models=ecmwf_ifs025,gfs_seamless,icon_seamless"
     )
     t0 = time.perf_counter()
     try:
@@ -370,17 +371,26 @@ def fetch_weather(lat: float, lon: float) -> dict:
         hourly = data.get("hourly", {})
         m15 = data.get("minutely_15", {})
 
-        # 1. Hourly Rain & Weather Code (Direct Best-Match Model)
+        models = ["ecmwf_ifs025", "gfs_seamless", "icon_seamless"]
+
+        # 1. Scientific Ensemble Fusion across 3 Global Forecasting Models
         h_times = hourly.get("time", [])
-        raw_hourly_precip = [float(p) for p in hourly.get("precipitation", [0.0] * len(h_times))]
-        raw_hourly_codes = [int(c) for c in hourly.get("weather_code", [0] * len(h_times))]
+        unified_hourly_precip = []
+        unified_hourly_codes = []
+        for i in range(len(h_times)):
+            p_vals = [hourly.get(f"precipitation_{m}", [0]*len(h_times))[i] for m in models if hourly.get(f"precipitation_{m}")]
+            c_vals = [hourly.get(f"weather_code_{m}", [0]*len(h_times))[i] for m in models if hourly.get(f"weather_code_{m}")]
+            valid_p = [float(v) for v in p_vals if v is not None]
+            valid_c = [int(c) for c in c_vals if c is not None]
+            # Ensemble Mean for precipitation (avoids single-model misses and max-spike hallucinations)
+            mean_p = round(sum(valid_p) / len(valid_p), 2) if valid_p else 0.0
+            max_c = max(valid_c) if valid_c else 0
+            unified_hourly_precip.append(mean_p)
+            unified_hourly_codes.append(max_c)
 
-        # Filter trace condensation noise (< 0.15 mm) from individual hourly slots
-        cleaned_hourly_precip = [p if p >= 0.15 else 0.0 for p in raw_hourly_precip]
-
-        # 2. Extract 24-Hour Past History (first 24 slots)
-        past_times = h_times[:24] if len(h_times) >= 24 else h_times[:len(cleaned_hourly_precip)]
-        past_precips = cleaned_hourly_precip[:24] if len(cleaned_hourly_precip) >= 24 else cleaned_hourly_precip
+        # 2. Extract 24-Hour Past History (slots 0..23)
+        past_times = h_times[:24] if len(h_times) >= 24 else h_times[:len(unified_hourly_precip)]
+        past_precips = unified_hourly_precip[:24] if len(unified_hourly_precip) >= 24 else unified_hourly_precip
 
         p_1h = float(past_precips[-1]) if past_precips else 0.0
         p_3h = float(sum(past_precips[-3:])) if len(past_precips) >= 3 else float(sum(past_precips))
@@ -398,6 +408,10 @@ def fetch_weather(lat: float, lon: float) -> dict:
         residual_burden = sum(p * w for p, w in zip(reversed_precips, drain_weights_24h))
 
         # 3. Active Current Precipitation & Storm Code
+        curr_hour_idx = 24 if len(unified_hourly_precip) > 24 else len(unified_hourly_precip) - 1
+        curr_hour_precip = unified_hourly_precip[curr_hour_idx] if unified_hourly_precip else 0.0
+        curr_hour_code = unified_hourly_codes[curr_hour_idx] if unified_hourly_codes else 0
+
         c_precip = float(current.get("precipitation", 0.0))
         c_showers = float(current.get("showers", 0.0))
         c_rain = float(current.get("rain", 0.0))
@@ -405,17 +419,20 @@ def fetch_weather(lat: float, lon: float) -> dict:
 
         # 4. 15-Minute Nowcasting Projections (Next 30m to 60m)
         m15_times = m15.get("time", [])
-        raw_m15 = [float(p) for p in m15.get("precipitation", [0.0] * len(m15_times))]
-        cleaned_m15 = [p if p >= 0.10 else 0.0 for p in raw_m15]
+        unified_m15 = []
+        for i in range(len(m15_times)):
+            m_vals = [m15.get(f"precipitation_{m}", [0]*len(m15_times))[i] for m in models if m15.get(f"precipitation_{m}")]
+            valid_m = [float(v) for v in m_vals if v is not None]
+            unified_m15.append(round(sum(valid_m)/len(valid_m), 2) if valid_m else 0.0)
 
-        p_next_30m = float(sum(cleaned_m15[13:15])) if len(cleaned_m15) >= 15 else 0.0
-        p_next_60m = float(sum(cleaned_m15[13:17])) if len(cleaned_m15) >= 17 else 0.0
+        p_next_30m = float(sum(unified_m15[13:15])) if len(unified_m15) >= 15 else 0.0
+        p_next_60m = float(sum(unified_m15[13:17])) if len(unified_m15) >= 17 else 0.0
 
         nowcast_intervals = []
         if len(m15_times) >= 17:
             for idx, offset_m in [(13, 15), (14, 30), (15, 45), (16, 60)]:
                 t_str = m15_times[idx].split("T")[-1]
-                p_val = float(cleaned_m15[idx])
+                p_val = float(unified_m15[idx])
                 nowcast_intervals.append({
                     "horizon": f"+{offset_m}m ({t_str})",
                     "rain_mm": round(p_val, 2),
@@ -423,31 +440,32 @@ def fetch_weather(lat: float, lon: float) -> dict:
                 })
 
         # Calculate live rain rate
-        recent_m15 = cleaned_m15[11:14] if len(cleaned_m15) >= 14 else cleaned_m15
+        recent_m15 = unified_m15[11:14] if len(unified_m15) >= 14 else unified_m15
         max_m15_rate = max(recent_m15) * 4.0 if recent_m15 else 0.0
 
         WMO_RAIN_BASELINES = {
             51: 1.5, 53: 2.5, 55: 4.0,
-            61: 4.5, 63: 10.0, 65: 22.0,
-            80: 5.0, 81: 12.0, 82: 28.0,
+            61: 4.5, 63: 10.0, 65: 20.0,
+            80: 5.0, 81: 12.0, 82: 25.0,
             95: 22.0, 96: 35.0, 99: 50.0
         }
 
         raw_current_precip = max(c_precip, c_rain, c_showers)
         hourly_rate_from_sensor = raw_current_precip * 4.0  # 15m to 1h conversion
 
-        if c_code in WMO_RAIN_BASELINES:
-            # Active rain confirmed by meteorological code: never mute or suppress!
-            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, p_1h, WMO_RAIN_BASELINES[c_code])
-            active_weather_code = c_code
-        elif hourly_rate_from_sensor >= 0.8 or max_m15_rate >= 0.8:
-            # Physical sensor or 15m radar detected active rain
-            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate)
-            active_weather_code = 61 if c_code < 50 else c_code
+        active_weather_code = max(c_code, curr_hour_code)
+
+        if active_weather_code in WMO_RAIN_BASELINES:
+            # Active rain confirmed by meteorological code
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip, p_1h, WMO_RAIN_BASELINES[active_weather_code])
+        elif max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip) >= 0.5:
+            # Physical sensor or model detected active rain
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip)
+            if active_weather_code < 50:
+                active_weather_code = 61  # Slight rain
         else:
-            # Clear or dry overcast sky - nocturnal humidity condensation is filtered
+            # Clear or dry overcast sky
             active_current_precip = 0.0
-            active_weather_code = c_code
 
         # Drainage phase description
         if active_weather_code in [95, 96, 99]:
@@ -494,10 +512,10 @@ def fetch_weather(lat: float, lon: float) -> dict:
             "nowcast_15m": nowcast_intervals,
             "hourly": {
                 "time": h_times,
-                "precipitation": cleaned_hourly_precip,
-                "weather_code": raw_hourly_codes
+                "precipitation": unified_hourly_precip,
+                "weather_code": unified_hourly_codes
             },
-            "models_used": "Open-Meteo High-Resolution Best-Match",
+            "models_used": "Multi-Model Scientific Ensemble (ECMWF IFS, NOAA GFS, DWD ICON)",
             "raw_data": data,
             "latency_ms": latency_ms,
             "endpoint_url": url,
@@ -1529,7 +1547,7 @@ with tab_weather:
         <div class="weather-info-box">
             <span>📍 <b>{dest_name}</b></span>
             <span>🛰️ <b>Radar Snapshot:</b> {formatted_obs_time}</span>
-            <span>⚡ <b>Radar Engine:</b> Open-Meteo Calibrated Best-Match (ECMWF + DWD)</span>
+            <span>⚡ <b>Radar Engine:</b> Multi-Model Ensemble Mean (ECMWF + GFS + ICON)</span>
             <span>🟢 <b>Dashboard Sync:</b> Live (5-min cache)</span>
         </div>
         """,
