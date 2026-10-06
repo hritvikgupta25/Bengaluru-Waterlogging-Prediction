@@ -810,75 +810,70 @@ def calculate_flood_risk(tags: dict, coords: list[tuple[float, float]], water_no
     tunnel = str(tags.get("tunnel", "")).lower()
     layer = str(tags.get("layer", "")).strip()
     highway = str(tags.get("highway", "")).lower()
+    surface = str(tags.get("surface", "")).lower()
 
-    # Step 1: Physical Infrastructure Vulnerability & Drainage Capacity
+    # Step 1: Physical Infrastructure Baseline & Vulnerability
     if bridge == "yes" or layer == "1":
         base_score = 5.0
         infra_type = "Flyover / Elevated Bridge"
         retention = 0.05   # Rapid gravity shedding
-        vuln = 0.20        # Elevated: water sheds freely
+        vuln = 0.20        # Water sheds freely
     elif tunnel == "yes" or layer == "-1":
-        base_score = 75.0
+        base_score = 40.0  # Sits in blue advisory in normal conditions
         infra_type = "Underpass / Low Depression (Waterlogging Trap)"
-        retention = 1.80   # Sunken catchment bowl
+        retention = 1.60   # Sunken catchment bowl
         vuln = 1.70        # Primary hazard zone during downpours
     elif highway in ["trunk", "primary", "trunk_link", "primary_link"]:
-        base_score = 20.0
+        base_score = 18.0
         infra_type = "Major Arterial Road"
         retention = 0.40   # Wide camber and engineered storm side-drains
         vuln = 0.65        # High drainage capacity, clears rain easily
     elif highway in ["secondary", "tertiary"]:
-        base_score = 30.0
+        base_score = 24.0
         infra_type = "Secondary / Collector Road"
         retention = 0.60
         vuln = 0.85
+    elif surface in ["unpaved", "dirt", "gravel", "ground"]:
+        base_score = 35.0  # Unpaved muddy roads naturally hold advisory puddle score
+        infra_type = "Unpaved / Layout Dirt Track"
+        retention = 1.00
+        vuln = 1.15
     elif highway in ["residential", "unclassified"]:
-        base_score = 40.0
+        base_score = 28.0
         infra_type = "Residential Layout Road"
-        retention = 0.90   # Narrow layout drains, unpaved shoulders
-        vuln = 1.05
+        retention = 0.85   # Narrow layout drains, unpaved shoulders
+        vuln = 1.00
     else:
-        base_score = 30.0
+        base_score = 24.0
         infra_type = "Standard Road"
         retention = 0.70
         vuln = 0.90
 
-    # Step 2: Water Proximity Penalty (Only amplifies risk if substantial water is present)
+    # Step 2: Water Proximity (Lake / Storm Drain / Raja Kaluve canal)
     near_water = check_water_proximity(coords, water_nodes, threshold_m=100.0)
+    proximity_add = 12.0 if near_water else 0.0
     if near_water:
         retention += 0.25
-        # Canals and lakes only overflow into adjacent roads during heavy rainfall (>8mm)
-        if (precipitation + residual_rain) > 8.0:
-            vuln *= 1.25
-        else:
-            vuln *= 1.05
+        vuln *= 1.20
 
-    score_after_proximity = base_score + (15.0 if near_water else 0.0)
+    score_after_proximity = base_score + proximity_add
 
     # Step 3: Effective Hydrological Water Load (Active Rain + Lingering Runoff)
     effective_precip = precipitation + (residual_rain * retention)
 
-    # Step 4: Calibrated Physical Hazard Curve
-    # Dry roads (<= 0.3 mm) are ALWAYS 0% (Clear / Green) regardless of road type or yesterday's rain.
-    if effective_precip <= 0.3:
-        final_risk = 0.0
+    # Step 4: Simple, Scaled Rain Impact Curve
+    if effective_precip <= 0.05:
+        h = 0.0
     elif effective_precip <= 5.0:
-        # Drizzle / light rain (<=5 mm/h): 10% - 30% hazard (tarmac is wet, but drains freely)
-        h = 10.0 + (effective_precip * 4.0)
-        final_risk = h * vuln
+        h = effective_precip * 2.5
     elif effective_precip <= 15.0:
-        # Moderate rain: 30% - 55% hazard (curbside gutter flow, unpaved puddles)
-        h = 30.0 + ((effective_precip - 5.0) * 2.5)
-        final_risk = h * vuln
+        h = 12.5 + (effective_precip - 5.0) * 2.0
     elif effective_precip <= 35.0:
-        # Heavy rain: 55% - 85% hazard (storm drains overwhelmed, layout waterlogging)
-        h = 55.0 + ((effective_precip - 15.0) * 1.5)
-        final_risk = h * vuln
+        h = 32.5 + (effective_precip - 15.0) * 1.5
     else:
-        # Torrential cloudburst (>35 mm/h): flash flooding
-        h = min(100.0, 85.0 + ((effective_precip - 35.0) * 1.0))
-        final_risk = h * vuln
+        h = min(60.0, 62.5 + (effective_precip - 35.0) * 1.0)
 
+    final_risk = min(100.0, base_score + proximity_add + (h * vuln))
     final_risk = max(0.0, min(100.0, final_risk))
 
     # Step 5: 5-Tier Color Progression:
