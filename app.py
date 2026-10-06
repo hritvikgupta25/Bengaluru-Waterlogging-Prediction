@@ -412,12 +412,19 @@ def fetch_weather(lat: float, lon: float) -> dict:
         p_6h = float(sum(past_precips[-6:])) if len(past_precips) >= 6 else float(sum(past_precips))
         p_24h = float(sum(past_precips)) if past_precips else 0.0
 
-        # Physical 24h soil saturation & drainage retention model
+        # Realistic urban road runoff retention:
+        # Paved urban roads shed 75% of surface runoff in the 1st hour, 90% within 2-3 hours.
+        # Soil saturation / mud only lingers for 3-4 hours after rain ceases. Beyond 4-5 hours, road surfaces are dry.
         drain_weights_24h = [
-            0.90, 0.80, 0.70, 0.60, 0.50, 0.45,
-            0.35, 0.30, 0.25, 0.20, 0.18, 0.15,
-            0.12, 0.10, 0.08, 0.06, 0.05, 0.04,
-            0.03, 0.02, 0.02, 0.01, 0.01, 0.01
+            0.35,  # 0-1h ago: lingering surface runoff
+            0.15,  # 1-2h ago: damp roads / shallow roadside puddles
+            0.05,  # 2-3h ago: minor gutter trickling
+            0.02,  # 3-4h ago: damp roadside mud
+            # 4h to 24h ago: negligible surface road water
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0
         ]
         reversed_precips = list(reversed(past_precips))
         residual_burden = sum(p * w for p, w in zip(reversed_precips, drain_weights_24h))
@@ -804,47 +811,82 @@ def calculate_flood_risk(tags: dict, coords: list[tuple[float, float]], water_no
     layer = str(tags.get("layer", "")).strip()
     highway = str(tags.get("highway", "")).lower()
 
-    # Step 1: Base Score
+    # Step 1: Physical Infrastructure Vulnerability & Drainage Capacity
     if bridge == "yes" or layer == "1":
         base_score = 5.0
         infra_type = "Flyover / Elevated Bridge"
-        retention = 0.05  # Gravity drainage: water sheds immediately
+        retention = 0.05   # Rapid gravity shedding
+        vuln = 0.20        # Elevated: water sheds freely
     elif tunnel == "yes" or layer == "-1":
-        base_score = 85.0
+        base_score = 75.0
         infra_type = "Underpass / Low Depression (Waterlogging Trap)"
-        retention = 1.50  # Sunken bowl: water remains trapped
+        retention = 1.80   # Sunken catchment bowl
+        vuln = 1.70        # Primary hazard zone during downpours
     elif highway in ["trunk", "primary", "trunk_link", "primary_link"]:
-        base_score = 30.0
+        base_score = 20.0
         infra_type = "Major Arterial Road"
-        retention = 0.80  # Engineered stormwater side drains
+        retention = 0.40   # Wide camber and engineered storm side-drains
+        vuln = 0.65        # High drainage capacity, clears rain easily
+    elif highway in ["secondary", "tertiary"]:
+        base_score = 30.0
+        infra_type = "Secondary / Collector Road"
+        retention = 0.60
+        vuln = 0.85
     elif highway in ["residential", "unclassified"]:
-        base_score = 50.0
-        infra_type = "Residential Layout Road"
-        retention = 1.10  # Slower layout gutters and unpaved shoulders
-    else:
         base_score = 40.0
+        infra_type = "Residential Layout Road"
+        retention = 0.90   # Narrow layout drains, unpaved shoulders
+        vuln = 1.05
+    else:
+        base_score = 30.0
         infra_type = "Standard Road"
-        retention = 1.00
+        retention = 0.70
+        vuln = 0.90
 
-    # Step 2: Water Proximity Penalty
+    # Step 2: Water Proximity Penalty (Only amplifies risk if substantial water is present)
     near_water = check_water_proximity(coords, water_nodes, threshold_m=100.0)
     if near_water:
-        retention = max(retention, 1.35)  # Overflow / backflow from storm canal or lake
+        retention += 0.25
+        # Canals and lakes only overflow into adjacent roads during heavy rainfall (>8mm)
+        if (precipitation + residual_rain) > 8.0:
+            vuln *= 1.25
+        else:
+            vuln *= 1.05
 
-    score_after_proximity = base_score + (25.0 if near_water else 0.0)
+    score_after_proximity = base_score + (15.0 if near_water else 0.0)
 
-    # Step 3: Combined Precipitation (Active Rain + Standing Water & Soil Saturation)
+    # Step 3: Effective Hydrological Water Load (Active Rain + Lingering Runoff)
     effective_precip = precipitation + (residual_rain * retention)
 
-    if effective_precip <= 0.05:
-        final_risk = score_after_proximity * 0.5
+    # Step 4: Calibrated Physical Hazard Curve
+    # Dry roads (<= 0.3 mm) are ALWAYS 0% (Clear / Green) regardless of road type or yesterday's rain.
+    if effective_precip <= 0.3:
+        final_risk = 0.0
+    elif effective_precip <= 5.0:
+        # Drizzle / light rain (<=5 mm/h): 10% - 30% hazard (tarmac is wet, but drains freely)
+        h = 10.0 + (effective_precip * 4.0)
+        final_risk = h * vuln
+    elif effective_precip <= 15.0:
+        # Moderate rain: 30% - 55% hazard (curbside gutter flow, unpaved puddles)
+        h = 30.0 + ((effective_precip - 5.0) * 2.5)
+        final_risk = h * vuln
+    elif effective_precip <= 35.0:
+        # Heavy rain: 55% - 85% hazard (storm drains overwhelmed, layout waterlogging)
+        h = 55.0 + ((effective_precip - 15.0) * 1.5)
+        final_risk = h * vuln
     else:
-        final_risk = min(100.0, score_after_proximity + (effective_precip * 10.0))
+        # Torrential cloudburst (>35 mm/h): flash flooding
+        h = min(100.0, 85.0 + ((effective_precip - 35.0) * 1.0))
+        final_risk = h * vuln
 
     final_risk = max(0.0, min(100.0, final_risk))
 
-    # Step 4: 5-Tier Color Progression:
-    # 🟢 Green (Clear) -> 🔵 Blue (Wet / Puddles) -> 🟡 Yellow (Caution / Mud) -> 🟠 Orange (High Risk) -> 🔴 Red (Severe Waterlogging)
+    # Step 5: 5-Tier Color Progression:
+    # 🟢 Green (<35%): Safe & Passable
+    # 🔵 Blue (35-49%): Wet Road / Minor Puddles
+    # 🟡 Yellow (50-69%): Caution / Water Accumulation & Mud
+    # 🟠 Orange (70-84%): High Risk / Deep Waterlogging
+    # 🔴 Red (>=85%): Severe Waterlogging / Impassable
     if final_risk < 35.0:
         color = "#10B981"  # Emerald Green
         risk_category = "Clear / Low Risk"
@@ -909,7 +951,6 @@ def calculate_forecast_flood_risk(
     score_after_proximity = current_info["score_after_proximity"]
 
     # 1. Drainage Retention of Standing Water over 30m vs 60m:
-    # Underpasses and low residential dips in Bengaluru retain standing water for hours.
     tunnel = str(tags.get("tunnel", "")).lower()
     layer = str(tags.get("layer", "")).strip()
     bridge = str(tags.get("bridge", "")).lower()
@@ -925,30 +966,32 @@ def calculate_forecast_flood_risk(
         catchment_multiplier = 0.05
     elif highway in ["residential", "unclassified"]:
         # Flat layout roads with choked gutters retain standing water and mud
-        decay_factor = 0.92 if horizon_minutes <= 30 else 0.82
+        decay_factor = 0.85 if horizon_minutes <= 30 else 0.70
         catchment_multiplier = 1.15
     elif near_water:
-        decay_factor = 0.94 if horizon_minutes <= 30 else 0.85
-        catchment_multiplier = 1.35
+        decay_factor = 0.88 if horizon_minutes <= 30 else 0.75
+        catchment_multiplier = 1.30
     elif highway in ["trunk", "primary", "trunk_link", "primary_link"]:
         # Engineered side drains
-        decay_factor = 0.86 if horizon_minutes <= 30 else 0.72
-        catchment_multiplier = 0.85
+        decay_factor = 0.70 if horizon_minutes <= 30 else 0.50
+        catchment_multiplier = 0.80
     else:
-        decay_factor = 0.88 if horizon_minutes <= 30 else 0.78
+        decay_factor = 0.80 if horizon_minutes <= 30 else 0.65
         catchment_multiplier = 1.00
 
     decayed_residual = current_residual * decay_factor
     inflow_effective = forecast_precip * catchment_multiplier
-    effective_forecast_precip = inflow_effective + (decayed_residual * retention)
 
-    # 3. Forecast Risk Score (0 - 100)
-    if effective_forecast_precip <= 0.05:
-        forecast_risk = score_after_proximity * 0.5
-    else:
-        forecast_risk = min(100.0, score_after_proximity + (effective_forecast_precip * 10.0))
-
-    forecast_risk = max(0.0, min(100.0, forecast_risk))
+    # Compute forecast risk with the same calibrated physical model
+    forecast_info = calculate_flood_risk(
+        tags=tags,
+        coords=coords,
+        water_nodes=water_nodes,
+        precipitation=inflow_effective,
+        residual_rain=decayed_residual
+    )
+    forecast_risk = forecast_info["final_risk"]
+    effective_forecast_precip = forecast_info["effective_precip"]
 
     # 4. Trend Analysis
     risk_delta = forecast_risk - current_risk
@@ -1278,32 +1321,34 @@ if not is_forecast:
 
     with col_alert:
         w_code = int(weather_data.get("weather_code", 0))
-        if w_code in [95, 96, 99]:
+        if w_code in [95, 96, 99] or active_precip >= 20.0:
             st.error(
-                f"⛈️ **Active Thunderstorm Alert ({active_precip:.1f} mm):** Convective storm cells and heavy downpour actively pounding the area! "
-                "Extreme flash waterlogging risk in underpasses and low-lying roads. Avoid two-wheeler transit!"
+                f"⛈️ **Severe Storm Alert ({active_precip:.1f} mm/h):** Intense convective downpour active in the area. "
+                "Sunken railway underpasses and low-lying dips are at severe waterlogging risk. Avoid flood-prone underpasses!"
             )
-        elif active_precip >= 5.0:
-            st.error(
-                f"🔴 **Severe Downpour Alert ({active_precip:.1f} mm):** Heavy torrential rain actively waterlogging low-lying streets and underpasses. Avoid low corridors."
-            )
-        elif active_precip >= 1.5:
+        elif active_precip >= 8.0:
             st.warning(
-                f"🟠 **Active Rain Alert ({active_precip:.1f} mm):** Surface runoff accumulating rapidly on streets. "
-                "Proceed with caution around road dips and residential layout lanes."
+                f"🟠 **Heavy Downpour Alert ({active_precip:.1f} mm/h):** Substantial rainfall accumulating in roadside drains. "
+                "Water pooling in residential layouts and uneven shoulders. Exercise caution."
+            )
+        elif active_precip >= 2.5:
+            st.warning(
+                f"🟡 **Moderate Rain Advisory ({active_precip:.1f} mm/h):** Road gutters actively draining runoff. "
+                "Roads are wet with localized puddles. Main corridors remain fully passable with normal caution."
             )
         elif active_precip > 0.0:
             st.info(
-                f"🟡 **Passing Rain / Showers ({active_precip:.1f} mm):** Roads are wet with localized puddles. Normal driving caution recommended."
+                f"🔵 **Light Rain / Drizzle ({active_precip:.1f} mm/h):** Wet pavement with minor tire spray. "
+                "Normal road conditions; all major routes drain freely."
             )
-        elif active_residual >= 1.5:
+        elif active_residual >= 3.0:
             st.warning(
-                f"🟠 **Persistent Waterlogging Alert ({active_residual:.1f} mm surface water):** Rain has paused, but earlier downpours "
-                f"({past_3h_rain:.1f} mm in past 3h, {past_24h_rain:.1f} mm today) have left residential layouts, dips, and underpasses waterlogged and muddy."
+                f"🟠 **Slow Drainage Notice:** Rain has stopped, but heavy downpours within the last hour "
+                f"({past_1h_rain:.1f} mm recently) leave low dips and underpasses slowly clearing."
             )
-        elif active_residual >= 0.4:
+        elif active_residual >= 1.0:
             st.info(
-                f"🟡 **Wet Roads & Muddy Puddles:** Rain has stopped, but lingering puddles, mud, and drain runoff remain on roads from earlier rainfall ({past_3h_rain:.1f} mm in past 3h)."
+                f"🟡 **Damp Roads & Puddles:** Rain ceased; roadside puddles and damp pavement drying out. Arterial roads clear."
             )
         else:
             st.success(
@@ -1311,7 +1356,7 @@ if not is_forecast:
             )
 else:
     # FORECAST METRICS & ALERT
-    target_decayed_residual = round((active_residual * 0.92) if selected_horizon == 30 else (active_residual * 0.82), 1)
+    target_decayed_residual = round((active_residual * 0.70) if selected_horizon == 30 else (active_residual * 0.50), 1)
 
     with col_precip:
         st.metric(
@@ -1329,35 +1374,38 @@ else:
 
     with col_alert:
         w_code = int(weather_data.get("weather_code", 0))
-        if w_code in [95, 96, 99] or target_forecast_precip >= 3.0:
+        if w_code in [95, 96, 99] or target_forecast_precip >= 15.0:
             st.error(
-                f"⛈️ **Active Storm & Inflow Alert (+{selected_horizon}m):** Convective storm ({target_forecast_precip:.1f} mm incoming) "
-                "will rapidly overwhelm road gutters. Severe waterlogging and submerged underpasses expected!"
+                f"⛈️ **Severe Inflow Warning (+{selected_horizon}m):** Torrential downpour ({target_forecast_precip:.1f} mm incoming) "
+                "expected to overwhelm gutters. High waterlogging hazard in underpasses and low depressions!"
             )
-        elif target_forecast_precip >= 1.0 or target_rain_rate >= 4.0:
+        elif target_forecast_precip >= 6.0:
             st.warning(
-                f"🟠 **Rain Inflow Forecast (+{selected_horizon}m):** Incoming rainfall ({target_forecast_precip:.1f} mm) "
-                "will heighten water accumulation across residential roads and low dips."
+                f"🟠 **Heavy Rain Forecast (+{selected_horizon}m):** Incoming rain ({target_forecast_precip:.1f} mm) "
+                "will cause water accumulation across residential layout lanes and unpaved shoulders."
+            )
+        elif target_forecast_precip >= 2.0:
+            st.info(
+                f"🟡 **Moderate Shower Expected (+{selected_horizon}m):** Showers ({target_forecast_precip:.1f} mm) "
+                "will wet roads. Minor roadside puddles expected; arterial roads remain fully navigable."
             )
         elif target_forecast_precip > 0.2:
             st.info(
-                f"🟡 **Passing Shower Notice (+{selected_horizon}m):** Light passing rain ({target_forecast_precip:.1f} mm) "
-                "expected. Minor puddles likely; arterial corridors remain passable."
+                f"🔵 **Passing Shower Notice (+{selected_horizon}m):** Light drizzle/showers ({target_forecast_precip:.1f} mm) "
+                "expected. Surface wetting only with zero waterlogging risk."
             )
-        elif active_residual >= 1.5:
+        elif active_residual >= 3.0:
             st.warning(
-                f"🟠 **Lingering Waterlogging Alert (+{selected_horizon}m):** No immediate rain forecast, "
-                f"but heavy earlier rainfall ({past_3h_rain:.1f} mm past 3h, {past_24h_rain:.1f} mm today) means "
-                "underpasses, low dips, and residential layouts will remain waterlogged and muddy over the next hour."
+                f"🟠 **Lingering Drainage Delay (+{selected_horizon}m):** No new rain, but recent downpours "
+                "leave low dips draining slowly over the next hour."
             )
-        elif active_residual >= 0.4:
+        elif active_residual >= 1.0:
             st.info(
-                f"🟡 **Puddles & Mud Notice (+{selected_horizon}m):** No immediate new rainfall forecast, "
-                f"but standing water, mud, and roadside puddles from earlier rain will persist on low roads and unpaved shoulders due to slow drainage."
+                f"🟡 **Damp Roads Notice (+{selected_horizon}m):** Standing water from earlier rain steadily clearing. Corridors passable."
             )
         else:
             st.success(
-                f"🟢 **Clear Transit Window (+{selected_horizon}m):** No rainfall projected and road surfaces are dry. Optimal commuting conditions."
+                f"🟢 **Clear Transit Forecast (+{selected_horizon}m):** No significant rain expected. Roads dry and optimal for travel."
             )
 
 # Analytics summary ribbon
