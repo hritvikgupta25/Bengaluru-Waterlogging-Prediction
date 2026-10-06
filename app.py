@@ -384,13 +384,28 @@ def fetch_weather(lat: float, lon: float) -> dict:
             valid_c = [int(c) for c in c_vals if c is not None]
             # Ensemble Mean for precipitation (avoids single-model misses and max-spike hallucinations)
             mean_p = round(sum(valid_p) / len(valid_p), 2) if valid_p else 0.0
-            max_c = max(valid_c) if valid_c else 0
-            unified_hourly_precip.append(mean_p)
-            unified_hourly_codes.append(max_c)
 
-        # 2. Extract 24-Hour Past History (slots 0..23)
-        past_times = h_times[:24] if len(h_times) >= 24 else h_times[:len(unified_hourly_precip)]
-        past_precips = unified_hourly_precip[:24] if len(unified_hourly_precip) >= 24 else unified_hourly_precip
+            # Weather code: only assign a rain code if rain is actually present/predicted (mean_p >= 0.1 mm)
+            if mean_p >= 0.1 and valid_c:
+                rain_codes = [c for c in valid_c if c >= 50]
+                code_to_use = max(rain_codes) if rain_codes else max(valid_c)
+            else:
+                dry_codes = [c for c in valid_c if c < 50]
+                code_to_use = max(dry_codes) if dry_codes else 0
+
+            unified_hourly_precip.append(mean_p)
+            unified_hourly_codes.append(code_to_use)
+
+        # 2. Extract 24-Hour Past History precisely anchored to current observation time
+        obs_time = current.get("time", "")
+        curr_hour_idx = 0
+        for idx, t in enumerate(h_times):
+            if t <= obs_time:
+                curr_hour_idx = idx
+
+        start_past_idx = max(0, curr_hour_idx - 23)
+        past_times = h_times[start_past_idx:curr_hour_idx + 1]
+        past_precips = unified_hourly_precip[start_past_idx:curr_hour_idx + 1]
 
         p_1h = float(past_precips[-1]) if past_precips else 0.0
         p_3h = float(sum(past_precips[-3:])) if len(past_precips) >= 3 else float(sum(past_precips))
@@ -408,9 +423,8 @@ def fetch_weather(lat: float, lon: float) -> dict:
         residual_burden = sum(p * w for p, w in zip(reversed_precips, drain_weights_24h))
 
         # 3. Active Current Precipitation & Storm Code
-        curr_hour_idx = 24 if len(unified_hourly_precip) > 24 else len(unified_hourly_precip) - 1
-        curr_hour_precip = unified_hourly_precip[curr_hour_idx] if unified_hourly_precip else 0.0
-        curr_hour_code = unified_hourly_codes[curr_hour_idx] if unified_hourly_codes else 0
+        curr_hour_precip = unified_hourly_precip[curr_hour_idx] if curr_hour_idx < len(unified_hourly_precip) else 0.0
+        curr_hour_code = unified_hourly_codes[curr_hour_idx] if curr_hour_idx < len(unified_hourly_codes) else 0
 
         c_precip = float(current.get("precipitation", 0.0))
         c_showers = float(current.get("showers", 0.0))
@@ -443,29 +457,30 @@ def fetch_weather(lat: float, lon: float) -> dict:
         recent_m15 = unified_m15[11:14] if len(unified_m15) >= 14 else unified_m15
         max_m15_rate = max(recent_m15) * 4.0 if recent_m15 else 0.0
 
-        WMO_RAIN_BASELINES = {
-            51: 1.5, 53: 2.5, 55: 4.0,
-            61: 4.5, 63: 10.0, 65: 20.0,
-            80: 5.0, 81: 12.0, 82: 25.0,
-            95: 22.0, 96: 35.0, 99: 50.0
-        }
-
         raw_current_precip = max(c_precip, c_rain, c_showers)
         hourly_rate_from_sensor = raw_current_precip * 4.0  # 15m to 1h conversion
 
-        active_weather_code = max(c_code, curr_hour_code)
+        # Baselines for confirmed convective storm codes (used when satellite/radar lags a cloudburst)
+        WMO_STORM_BASELINES = {
+            95: 22.0, 96: 35.0, 99: 50.0
+        }
 
-        if active_weather_code in WMO_RAIN_BASELINES:
-            # Active rain confirmed by meteorological code
-            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip, p_1h, WMO_RAIN_BASELINES[active_weather_code])
-        elif max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip) >= 0.5:
-            # Physical sensor or model detected active rain
-            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip)
-            if active_weather_code < 50:
-                active_weather_code = 61  # Slight rain
+        # Priority 1: Active Thunderstorm confirmed by real-time meteorological code
+        if c_code in WMO_STORM_BASELINES:
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate, curr_hour_precip, WMO_STORM_BASELINES[c_code])
+            active_weather_code = c_code
+        # Priority 2: Physical sensor / Doppler radar reports active rainfall (>= 0.1 mm/h)
+        elif max(hourly_rate_from_sensor, max_m15_rate) >= 0.1:
+            active_current_precip = max(hourly_rate_from_sensor, max_m15_rate)
+            active_weather_code = c_code if c_code >= 50 else (curr_hour_code if curr_hour_code >= 50 else 61)
+        # Priority 3: Severe rain code from live station observation (e.g. 61+, 80+) with non-zero hourly precip
+        elif c_code >= 60 and curr_hour_precip >= 0.5:
+            active_current_precip = curr_hour_precip
+            active_weather_code = c_code
+        # Priority 4: Dry conditions (Clear sky, overcast, or dry ground)
         else:
-            # Clear or dry overcast sky
             active_current_precip = 0.0
+            active_weather_code = c_code
 
         # Drainage phase description
         if active_weather_code in [95, 96, 99]:
