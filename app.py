@@ -126,7 +126,7 @@ st.markdown(
     }
     .risk-badge-low {
         background-color: rgba(16, 185, 129, 0.15);
-        color: #10B981;
+        color: #047857; /* Light mode: Emerald-700 (8.6:1 on white) */
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
@@ -134,7 +134,7 @@ st.markdown(
     }
     .risk-badge-advisory {
         background-color: rgba(2, 132, 199, 0.15);
-        color: #38BDF8;
+        color: #0369A1; /* Light mode: Sky-700 (7.4:1 on white) */
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
@@ -142,7 +142,7 @@ st.markdown(
     }
     .risk-badge-caution {
         background-color: rgba(234, 179, 8, 0.15);
-        color: #FACC15;
+        color: #854D0E; /* Light mode: Amber-800 (7.7:1 on white) */
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
@@ -150,7 +150,7 @@ st.markdown(
     }
     .risk-badge-high {
         background-color: rgba(249, 115, 22, 0.15);
-        color: #FB923C;
+        color: #C2410C; /* Light mode: Orange-700 (6.1:1 on white) */
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
@@ -158,7 +158,7 @@ st.markdown(
     }
     .risk-badge-severe {
         background-color: rgba(239, 68, 68, 0.15);
-        color: #F87171;
+        color: #B91C1C; /* Light mode: Red-700 (7.3:1 on white) */
         font-weight: 600;
         padding: 4px 8px;
         border-radius: 6px;
@@ -173,6 +173,12 @@ st.markdown(
         .summary-ribbon { color: #F1F5F9 !important; }
         .summary-ribbon-forecast { color: #E0F2FE !important; }
         .weather-info-box { color: #E2E8F0 !important; }
+        /* Restore original bright badge colors for dark mode */
+        .risk-badge-low { color: #10B981 !important; }
+        .risk-badge-advisory { color: #38BDF8 !important; }
+        .risk-badge-caution { color: #FACC15 !important; }
+        .risk-badge-high { color: #FB923C !important; }
+        .risk-badge-severe { color: #F87171 !important; }
     }
     [data-theme="dark"] .main-header { color: #F8FAFC !important; }
     [data-theme="dark"] .sub-header { color: #CBD5E1 !important; }
@@ -180,6 +186,12 @@ st.markdown(
     [data-theme="dark"] .summary-ribbon { color: #F1F5F9 !important; }
     [data-theme="dark"] .summary-ribbon-forecast { color: #E0F2FE !important; }
     [data-theme="dark"] .weather-info-box { color: #E2E8F0 !important; }
+    /* Restore original bright badge colors for Streamlit dark theme */
+    [data-theme="dark"] .risk-badge-low { color: #10B981 !important; }
+    [data-theme="dark"] .risk-badge-advisory { color: #38BDF8 !important; }
+    [data-theme="dark"] .risk-badge-caution { color: #FACC15 !important; }
+    [data-theme="dark"] .risk-badge-high { color: #FB923C !important; }
+    [data-theme="dark"] .risk-badge-severe { color: #F87171 !important; }
     </style>
     """,
     unsafe_allow_html=True
