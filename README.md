@@ -5,6 +5,9 @@ A dual-mode, real-time road waterlogging and flood forecast radar for commuters 
 When you search for any location (college, office, tech park, metro station, or cafe), the app analyzes every street within a **1 km radius** using live weather and road elevation data to show you which roads are safe and which ones are flooded.
 
 ---
+Currently live on: https://waterlogging-prediction.streamlit.app/
+---
+
 
 ## 🚦 Commuter Dashboard Features
 
